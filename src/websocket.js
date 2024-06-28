@@ -1,7 +1,7 @@
 let ws;
 
 export const connectWebSocket = (onMessage) => {
-  ws = new WebSocket('ws://192.168.17.11:3001');
+  ws = new WebSocket('wss://tunnel.yukai.dev');
 
   ws.onopen = () => {
     console.log('WebSocket connected');

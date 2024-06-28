@@ -3,39 +3,70 @@ import { connectWebSocket, sendMessage } from './websocket';
 
 const App = () => {
   const [mode, setMode] = useState('presentation');
-  const [pointerPosition, setPointerPosition] = useState({ x: 0, y: 0 });
+  const [pointerPosition, setPointerPosition] = useState({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
   const [showPointer, setShowPointer] = useState(false);
+  const [motionData, setMotionData] = useState({ x: 'N/A', y: 'N/A', z: 'N/A' });
+  const [permissionState, setPermissionState] = useState('unknown');
 
   const handleDeviceMotion = useCallback((event) => {
     if (mode === 'controller') {
       const { accelerationIncludingGravity } = event;
-      const sensitivity = 2; // Reduced sensitivity for smoother movement
-
-      setPointerPosition((prev) => {
-        const newX = Math.min(Math.max(prev.x + accelerationIncludingGravity.x * sensitivity, 0), window.innerWidth);
-        const newY = Math.min(Math.max(prev.y - accelerationIncludingGravity.y * sensitivity, 0), window.innerHeight);
-
-        sendMessage({ x: newX, y: newY });
-        return { x: newX, y: newY };
+      setMotionData({
+        x: accelerationIncludingGravity ? accelerationIncludingGravity.x.toFixed(2) : 'N/A',
+        y: accelerationIncludingGravity ? accelerationIncludingGravity.y.toFixed(2) : 'N/A',
+        z: accelerationIncludingGravity ? accelerationIncludingGravity.z.toFixed(2) : 'N/A'
       });
+
+      if (accelerationIncludingGravity) {
+        const sensitivity = 2;
+        setPointerPosition((prev) => {
+          const newX = Math.min(Math.max(prev.x + accelerationIncludingGravity.x * sensitivity, 0), window.innerWidth);
+          const newY = Math.min(Math.max(prev.y - accelerationIncludingGravity.y * sensitivity, 0), window.innerHeight);
+
+          // Send the updated position to the server
+          sendMessage({ x: newX, y: newY });
+          return { x: newX, y: newY };
+        });
+      }
     }
   }, [mode]);
 
+  const requestMotionPermission = () => {
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+      DeviceMotionEvent.requestPermission()
+        .then(response => {
+          setPermissionState(response);
+          if (response === 'granted') {
+            window.addEventListener('devicemotion', handleDeviceMotion);
+          }
+        })
+        .catch(console.error);
+    } else {
+      setPermissionState('not required');
+      window.addEventListener('devicemotion', handleDeviceMotion);
+    }
+  };
+
   useEffect(() => {
-    connectWebSocket((data) => {
+    const handleWebSocketMessage = (data) => {
       if (mode === 'presentation') {
         if (data.action === 'showPointer') {
           setShowPointer(true);
         } else if (data.action === 'hidePointer') {
           setShowPointer(false);
         } else if (data.x !== undefined && data.y !== undefined) {
-          setPointerPosition(data);
+          setPointerPosition({ x: data.x, y: data.y });
         }
       }
-    });
+    };
+
+    connectWebSocket(handleWebSocketMessage);
 
     if (mode === 'controller') {
-      window.addEventListener('devicemotion', handleDeviceMotion);
+      if (typeof DeviceMotionEvent.requestPermission !== 'function') {
+        setPermissionState('not required');
+        window.addEventListener('devicemotion', handleDeviceMotion);
+      }
     } else {
       window.removeEventListener('devicemotion', handleDeviceMotion);
     }
@@ -46,11 +77,14 @@ const App = () => {
   }, [mode, handleDeviceMotion]);
 
   const handleModeToggle = () => {
-    setMode(mode === 'presentation' ? 'controller' : 'presentation');
+    setMode(prevMode => prevMode === 'presentation' ? 'controller' : 'presentation');
   };
 
-  const handlePointerToggle = (show) => {
-    sendMessage({ action: show ? 'showPointer' : 'hidePointer' });
+  const handlePointerToggle = () => {
+    setShowPointer(show => {
+      sendMessage({ action: !show ? 'showPointer' : 'hidePointer' });
+      return !show
+    });
   };
 
   return (
@@ -69,21 +103,36 @@ const App = () => {
       )}
 
       {mode === 'controller' && (
-        <div className="h-full w-full bg-gray-200 flex items-center justify-center">
+        <div className="h-full w-full bg-gray-200 flex flex-col items-center justify-center">
           <button
-            className="bg-red-500 text-white px-8 py-4 rounded-full text-2xl"
-            onTouchStart={() => handlePointerToggle(true)}
-            onTouchEnd={() => handlePointerToggle(false)}
-            onMouseDown={() => handlePointerToggle(true)}
-            onMouseUp={() => handlePointerToggle(false)}
+            className="bg-red-500 text-white px-8 py-4 rounded-full text-2xl mb-4"
+            onClick={handlePointerToggle}
           >
             Hold to Show Pointer
           </button>
+          {typeof DeviceMotionEvent.requestPermission === 'function' && permissionState !== 'granted' && (
+            <button
+              className="bg-blue-500 text-white px-4 py-2 rounded mt-4"
+              onClick={requestMotionPermission}
+            >
+              Request Motion Permission
+            </button>
+          )}
+          <div className="text-black text-xl mt-4">
+            <p>Acceleration X: {motionData.x}</p>
+            <p>Acceleration Y: {motionData.y}</p>
+            <p>Acceleration Z: {motionData.z}</p>
+            <p>Pointer X: {pointerPosition.x.toFixed(2)}</p>
+            <p>Pointer Y: {pointerPosition.y.toFixed(2)}</p>
+            <p>DeviceMotion Supported: {window.DeviceMotionEvent ? 'Yes' : 'No'}</p>
+            <p>Permission State: {permissionState}</p>
+            <p>Show Pointer: {showPointer ? 'Yes' : 'No'}</p>
+          </div>
         </div>
       )}
 
       {/* Spotlight pointer */}
-      {mode === 'presentation' && showPointer && (
+      {showPointer && (
         <div
           className="absolute pointer-events-none"
           style={{
