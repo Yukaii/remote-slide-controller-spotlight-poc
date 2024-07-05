@@ -37,25 +37,12 @@ const App = () => {
     setOrientationData(newOrientationData);
 
     if (mode === 'controller' && calibrationDataRef.current) {
-      const sensitivityX = 2; // Lowered sensitivity
-      const sensitivityY = 2; // Lowered sensitivity
-
-      const calibratedBeta = event.beta - calibrationDataRef.current.beta;
-      const calibratedGamma = event.gamma - calibrationDataRef.current.gamma;
-
-      const deltaX = calibratedGamma * sensitivityX;
-      const deltaY = calibratedBeta * sensitivityY; // Removed negation to flip back
-
-      const newX = Math.max(0, Math.min(window.innerWidth, targetPosition.current.x + deltaX));
-      const newY = Math.max(0, Math.min(window.innerHeight, targetPosition.current.y + deltaY));
-
-      targetPosition.current = { x: newX, y: newY };
-
-      // Update pointer position immediately to reduce lag
-      setPointerPosition({ x: newX, y: newY });
-
       if (showPointerRef.current && now - lastSendTime.current > 100) { // Send every 100ms
-        sendMessage({ x: newX, y: newY, orientationData: newOrientationData, showPointer: showPointerRef.current });
+        sendMessage({
+          orientationData: newOrientationData,
+          calibrationData: calibrationDataRef.current,
+          showPointer: showPointerRef.current
+        });
         lastSendTime.current = now;
       }
     }
@@ -63,8 +50,8 @@ const App = () => {
 
   const animatePointer = useCallback(() => {
     setPointerPosition(current => {
-      const dx = (targetPosition.current.x - current.x) * 0.2; // Lowered from 0.5 to 0.2
-      const dy = (targetPosition.current.y - current.y) * 0.2; // Lowered from 0.5 to 0.2
+      const dx = (targetPosition.current.x - current.x) * 0.2;
+      const dy = (targetPosition.current.y - current.y) * 0.2;
       return {
         x: Math.max(0, Math.min(window.innerWidth, current.x + dx)),
         y: Math.max(0, Math.min(window.innerHeight, current.y + dy))
@@ -72,6 +59,7 @@ const App = () => {
     });
     animationRef.current = requestAnimationFrame(animatePointer);
   }, []);
+
   const requestOrientationPermission = () => {
     if (typeof DeviceOrientationEvent.requestPermission === 'function') {
       DeviceOrientationEvent.requestPermission()
@@ -94,8 +82,20 @@ const App = () => {
         if (data.showPointer !== undefined) {
           setShowPointer(data.showPointer);
         }
-        if (data.x !== undefined && data.y !== undefined) {
-          targetPosition.current = { x: data.x, y: data.y };
+        if (data.orientationData && data.calibrationData) {
+          const sensitivityX = 2;
+          const sensitivityY = 2;
+
+          const calibratedBeta = data.orientationData.beta - data.calibrationData.beta;
+          const calibratedGamma = data.orientationData.gamma - data.calibrationData.gamma;
+
+          const deltaX = calibratedGamma * sensitivityX;
+          const deltaY = calibratedBeta * sensitivityY;
+
+          targetPosition.current = {
+            x: Math.max(0, Math.min(window.innerWidth, targetPosition.current.x + deltaX)),
+            y: Math.max(0, Math.min(window.innerHeight, targetPosition.current.y + deltaY))
+          };
         }
         if (data.orientationData) {
           setOrientationData(data.orientationData);
@@ -153,7 +153,7 @@ const App = () => {
   };
 
   return (
-    <div className="h-screen w-screen relative">
+    <div className="h-screen w-screen relative overflow-hidden">
       <button
         className="absolute top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded z-10"
         onClick={handleModeToggle}
@@ -187,8 +187,6 @@ const App = () => {
             <p>Alpha: {orientationData.alpha}</p>
             <p>Beta: {orientationData.beta}</p>
             <p>Gamma: {orientationData.gamma}</p>
-            <p>Pointer X: {pointerPosition.x.toFixed(2)}</p>
-            <p>Pointer Y: {pointerPosition.y.toFixed(2)}</p>
             <p>DeviceOrientation Supported: {window.DeviceOrientationEvent ? 'Yes' : 'No'}</p>
             <p>Permission State: {permissionState}</p>
             <p>Show Pointer: {showPointer ? 'Yes' : 'No'}</p>
