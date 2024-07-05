@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { connectWebSocket, sendMessage } from './websocket';
 
-// Custom hook to create a state with a ref
 const useStateRef = (initialValue) => {
   const [state, setState] = useState(initialValue);
   const stateRef = useRef(state);
@@ -20,10 +19,13 @@ const App = () => {
   const [motionData, setMotionData] = useState({ x: 'N/A', y: 'N/A', z: 'N/A' });
   const [permissionState, setPermissionState] = useState('unknown');
   const lastUpdateTime = useRef(0);
+  const lastSendTime = useRef(0);
+  const animationRef = useRef(null);
+  const targetPosition = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
 
   const handleDeviceMotion = useCallback((event) => {
     const now = Date.now();
-    if (now - lastUpdateTime.current < 16) return; // Limit updates to ~60fps
+    if (now - lastUpdateTime.current < 32) return; // Limit updates to ~30fps
     lastUpdateTime.current = now;
 
     const { accelerationIncludingGravity } = event;
@@ -36,16 +38,28 @@ const App = () => {
 
     if (mode === 'controller' && accelerationIncludingGravity) {
       const sensitivity = 2;
-      setPointerPosition((prev) => {
-        const newX = Math.min(Math.max(prev.x + accelerationIncludingGravity.x * sensitivity, 0), window.innerWidth);
-        const newY = Math.min(Math.max(prev.y - accelerationIncludingGravity.y * sensitivity, 0), window.innerHeight);
+      const newX = Math.min(Math.max(targetPosition.current.x + accelerationIncludingGravity.x * sensitivity, 0), window.innerWidth);
+      const newY = Math.min(Math.max(targetPosition.current.y - accelerationIncludingGravity.y * sensitivity, 0), window.innerHeight);
+      targetPosition.current = { x: newX, y: newY };
 
-        // Send both the updated position and motion data to the server
+      if (showPointerRef.current && now - lastSendTime.current > 100) { // Send every 100ms
         sendMessage({ x: newX, y: newY, motionData: newMotionData, showPointer: showPointerRef.current });
-        return { x: newX, y: newY };
-      });
+        lastSendTime.current = now;
+      }
     }
   }, [mode]);
+
+  const animatePointer = useCallback(() => {
+    setPointerPosition(current => {
+      const dx = (targetPosition.current.x - current.x) * 0.1;
+      const dy = (targetPosition.current.y - current.y) * 0.1;
+      return {
+        x: current.x + dx,
+        y: current.y + dy
+      };
+    });
+    animationRef.current = requestAnimationFrame(animatePointer);
+  }, []);
 
   const requestMotionPermission = () => {
     if (typeof DeviceMotionEvent.requestPermission === 'function') {
@@ -70,7 +84,7 @@ const App = () => {
           setShowPointer(data.showPointer);
         }
         if (data.x !== undefined && data.y !== undefined) {
-          setPointerPosition({ x: data.x, y: data.y });
+          targetPosition.current = { x: data.x, y: data.y };
         }
         if (data.motionData) {
           setMotionData(data.motionData);
@@ -89,18 +103,24 @@ const App = () => {
       window.removeEventListener('devicemotion', handleDeviceMotion);
     }
 
+    animationRef.current = requestAnimationFrame(animatePointer);
+
     return () => {
       window.removeEventListener('devicemotion', handleDeviceMotion);
+      cancelAnimationFrame(animationRef.current);
     };
-  }, [mode, handleDeviceMotion]);
+  }, [mode, handleDeviceMotion, animatePointer]);
 
   const handleModeToggle = () => {
     setMode(prevMode => prevMode === 'presentation' ? 'controller' : 'presentation');
   };
 
-  const handlePointerToggle = (show) => {
-    setShowPointer(show);
-    sendMessage({ showPointer: show });
+  const handlePointerToggle = () => {
+    setShowPointer(prev => {
+      const newState = !prev;
+      sendMessage({ showPointer: newState });
+      return newState;
+    });
   };
 
   return (
@@ -121,13 +141,10 @@ const App = () => {
       {mode === 'controller' && (
         <div className="h-full w-full bg-gray-200 flex flex-col items-center justify-center">
           <button
-            className="bg-red-500 text-white px-8 py-4 rounded-full text-2xl mb-4 select-none"
-            onTouchStart={() => handlePointerToggle(true)}
-            onTouchEnd={() => handlePointerToggle(false)}
-            onMouseDown={() => handlePointerToggle(true)}
-            onMouseUp={() => handlePointerToggle(false)}
+            className={`bg-red-500 text-white px-8 py-4 rounded-full text-2xl mb-4 select-none ${showPointer ? 'opacity-50' : ''}`}
+            onClick={handlePointerToggle}
           >
-            Hold to Show Pointer
+            {showPointer ? 'Hide Pointer' : 'Show Pointer'}
           </button>
           {typeof DeviceMotionEvent.requestPermission === 'function' && permissionState !== 'granted' && (
             <button
@@ -161,7 +178,6 @@ const App = () => {
             height: '100px',
             background: 'radial-gradient(circle, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0) 70%)',
             transform: 'translate(-50%, -50%)',
-            transition: 'left 0.1s, top 0.1s', // Smooth transition for pointer movement
           }}
         />
       )}
