@@ -16,7 +16,7 @@ const App = () => {
   const [mode, setMode] = useState('presentation');
   const [pointerPosition, setPointerPosition] = useState({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
   const [showPointer, setShowPointer, showPointerRef] = useStateRef(false);
-  const [motionData, setMotionData] = useState({ x: 'N/A', y: 'N/A', z: 'N/A' });
+  const [orientationData, setOrientationData] = useState({ alpha: 'N/A', beta: 'N/A', gamma: 'N/A' });
   const [permissionState, setPermissionState] = useState('unknown');
   const [calibrationData, setCalibrationData, calibrationDataRef] = useStateRef(null);
   const lastUpdateTime = useRef(0);
@@ -24,45 +24,38 @@ const App = () => {
   const animationRef = useRef(null);
   const targetPosition = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
 
-  const handleDeviceMotion = useCallback((event) => {
+  const handleDeviceOrientation = useCallback((event) => {
     const now = Date.now();
     if (now - lastUpdateTime.current < 32) return; // Limit updates to ~30fps
     lastUpdateTime.current = now;
 
-    const { accelerationIncludingGravity } = event;
-    const newMotionData = {
-      x: accelerationIncludingGravity ? accelerationIncludingGravity.x.toFixed(2) : 'N/A',
-      y: accelerationIncludingGravity ? accelerationIncludingGravity.y.toFixed(2) : 'N/A',
-      z: accelerationIncludingGravity ? accelerationIncludingGravity.z.toFixed(2) : 'N/A'
+    const newOrientationData = {
+      alpha: event.alpha ? event.alpha.toFixed(2) : 'N/A',
+      beta: event.beta ? event.beta.toFixed(2) : 'N/A',
+      gamma: event.gamma ? event.gamma.toFixed(2) : 'N/A'
     };
-    setMotionData(newMotionData);
+    setOrientationData(newOrientationData);
 
-    if (mode === 'controller' && accelerationIncludingGravity && calibrationDataRef.current) {
-      const sensitivityX = 5;
-      const sensitivityY = 7;
-      const threshold = 0.5; // Minimum acceleration threshold
+    if (mode === 'controller' && calibrationDataRef.current) {
+      const sensitivityX = 10;
+      const sensitivityY = 10;
 
-      let deltaX = 0;
-      let deltaY = 0;
+      const calibratedBeta = event.beta - calibrationDataRef.current.beta;
+      const calibratedGamma = event.gamma - calibrationDataRef.current.gamma;
 
-      const calibratedX = accelerationIncludingGravity.x - calibrationDataRef.current.x;
-      const calibratedY = accelerationIncludingGravity.y - calibrationDataRef.current.y;
-
-      if (Math.abs(calibratedX) > threshold) {
-        deltaX = calibratedX * sensitivityX;
-      }
-
-      if (Math.abs(calibratedY) > threshold) {
-        deltaY = calibratedY * sensitivityY;
-      }
+      const deltaX = calibratedGamma * sensitivityX;
+      const deltaY = calibratedBeta * sensitivityY;
 
       const newX = targetPosition.current.x + deltaX;
       const newY = targetPosition.current.y + deltaY;
 
-      targetPosition.current = { x: newX, y: newY };
+      targetPosition.current = {
+        x: Math.max(0, Math.min(window.innerWidth, newX)),
+        y: Math.max(0, Math.min(window.innerHeight, newY))
+      };
 
       if (showPointerRef.current && now - lastSendTime.current > 100) { // Send every 100ms
-        sendMessage({ x: newX, y: newY, motionData: newMotionData, showPointer: showPointerRef.current });
+        sendMessage({ x: newX, y: newY, orientationData: newOrientationData, showPointer: showPointerRef.current });
         lastSendTime.current = now;
       }
     }
@@ -80,19 +73,19 @@ const App = () => {
     animationRef.current = requestAnimationFrame(animatePointer);
   }, []);
 
-  const requestMotionPermission = () => {
-    if (typeof DeviceMotionEvent.requestPermission === 'function') {
-      DeviceMotionEvent.requestPermission()
+  const requestOrientationPermission = () => {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission()
         .then(response => {
           setPermissionState(response);
           if (response === 'granted') {
-            window.addEventListener('devicemotion', handleDeviceMotion);
+            window.addEventListener('deviceorientation', handleDeviceOrientation);
           }
         })
         .catch(console.error);
     } else {
       setPermissionState('not required');
-      window.addEventListener('devicemotion', handleDeviceMotion);
+      window.addEventListener('deviceorientation', handleDeviceOrientation);
     }
   };
 
@@ -105,8 +98,8 @@ const App = () => {
         if (data.x !== undefined && data.y !== undefined) {
           targetPosition.current = { x: data.x, y: data.y };
         }
-        if (data.motionData) {
-          setMotionData(data.motionData);
+        if (data.orientationData) {
+          setOrientationData(data.orientationData);
         }
       }
     };
@@ -114,21 +107,21 @@ const App = () => {
     connectWebSocket(handleWebSocketMessage);
 
     if (mode === 'controller') {
-      if (typeof DeviceMotionEvent.requestPermission !== 'function') {
+      if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
         setPermissionState('not required');
-        window.addEventListener('devicemotion', handleDeviceMotion);
+        window.addEventListener('deviceorientation', handleDeviceOrientation);
       }
     } else {
-      window.removeEventListener('devicemotion', handleDeviceMotion);
+      window.removeEventListener('deviceorientation', handleDeviceOrientation);
     }
 
     animationRef.current = requestAnimationFrame(animatePointer);
 
     return () => {
-      window.removeEventListener('devicemotion', handleDeviceMotion);
+      window.removeEventListener('deviceorientation', handleDeviceOrientation);
       cancelAnimationFrame(animationRef.current);
     };
-  }, [mode, handleDeviceMotion, animatePointer, setShowPointer]);
+  }, [mode, handleDeviceOrientation, animatePointer, setShowPointer]);
 
   const handleModeToggle = () => {
     setMode(prevMode => prevMode === 'presentation' ? 'controller' : 'presentation');
@@ -146,24 +139,22 @@ const App = () => {
   };
 
   const calibrate = () => {
-    if (window.DeviceMotionEvent) {
-      window.addEventListener('devicemotion', calibrationHandler, { once: true });
+    if (window.DeviceOrientationEvent) {
+      window.addEventListener('deviceorientation', calibrationHandler, { once: true });
     }
   };
 
   const calibrationHandler = (event) => {
-    const { accelerationIncludingGravity } = event;
-    if (accelerationIncludingGravity) {
+    if (event.beta !== null && event.gamma !== null) {
       setCalibrationData({
-        x: accelerationIncludingGravity.x,
-        y: accelerationIncludingGravity.y,
-        z: accelerationIncludingGravity.z
+        beta: event.beta,
+        gamma: event.gamma
       });
     }
   };
 
   return (
-    <div className="h-screen w-screen relative overflow-hidden">
+    <div className="h-screen w-screen relative">
       <button
         className="absolute top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded z-10"
         onClick={handleModeToggle}
@@ -185,21 +176,21 @@ const App = () => {
           >
             {showPointer ? 'Hide Pointer' : 'Show Pointer'}
           </button>
-          {typeof DeviceMotionEvent.requestPermission === 'function' && permissionState !== 'granted' && (
+          {typeof DeviceOrientationEvent.requestPermission === 'function' && permissionState !== 'granted' && (
             <button
               className="bg-blue-500 text-white px-4 py-2 rounded mt-4"
-              onClick={requestMotionPermission}
+              onClick={requestOrientationPermission}
             >
-              Request Motion Permission
+              Request Orientation Permission
             </button>
           )}
           <div className="text-black text-xl mt-4">
-            <p>Acceleration X: {motionData.x}</p>
-            <p>Acceleration Y: {motionData.y}</p>
-            <p>Acceleration Z: {motionData.z}</p>
+            <p>Alpha: {orientationData.alpha}</p>
+            <p>Beta: {orientationData.beta}</p>
+            <p>Gamma: {orientationData.gamma}</p>
             <p>Pointer X: {pointerPosition.x.toFixed(2)}</p>
             <p>Pointer Y: {pointerPosition.y.toFixed(2)}</p>
-            <p>DeviceMotion Supported: {window.DeviceMotionEvent ? 'Yes' : 'No'}</p>
+            <p>DeviceOrientation Supported: {window.DeviceOrientationEvent ? 'Yes' : 'No'}</p>
             <p>Permission State: {permissionState}</p>
             <p>Show Pointer: {showPointer ? 'Yes' : 'No'}</p>
             <p>Calibration Data: {calibrationData ? 'Set' : 'Not Set'}</p>
