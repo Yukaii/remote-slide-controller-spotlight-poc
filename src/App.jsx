@@ -37,9 +37,24 @@ const App = () => {
     setMotionData(newMotionData);
 
     if (mode === 'controller' && accelerationIncludingGravity) {
-      const sensitivity = 2;
-      const newX = Math.min(Math.max(targetPosition.current.x + accelerationIncludingGravity.x * sensitivity, 0), window.innerWidth);
-      const newY = Math.min(Math.max(targetPosition.current.y - accelerationIncludingGravity.y * sensitivity, 0), window.innerHeight);
+      const sensitivityX = 5;
+      const sensitivityY = 7;
+      const threshold = 0.5; // Minimum acceleration threshold
+
+      let deltaX = 0;
+      let deltaY = 0;
+
+      if (Math.abs(accelerationIncludingGravity.x) > threshold) {
+        deltaX = accelerationIncludingGravity.x * sensitivityX;
+      }
+
+      if (Math.abs(accelerationIncludingGravity.y) > threshold) {
+        deltaY = accelerationIncludingGravity.y * sensitivityY;
+      }
+
+      const newX = targetPosition.current.x + deltaX; // Changed minus to plus
+      const newY = targetPosition.current.y + deltaY; // Changed minus to plus
+
       targetPosition.current = { x: newX, y: newY };
 
       if (showPointerRef.current && now - lastSendTime.current > 100) { // Send every 100ms
@@ -51,11 +66,11 @@ const App = () => {
 
   const animatePointer = useCallback(() => {
     setPointerPosition(current => {
-      const dx = (targetPosition.current.x - current.x) * 0.1;
-      const dy = (targetPosition.current.y - current.y) * 0.1;
+      const dx = (targetPosition.current.x - current.x) * 0.3;
+      const dy = (targetPosition.current.y - current.y) * 0.3;
       return {
-        x: current.x + dx,
-        y: current.y + dy
+        x: Math.max(0, Math.min(window.innerWidth, current.x + dx)),
+        y: Math.max(0, Math.min(window.innerHeight, current.y + dy))
       };
     });
     animationRef.current = requestAnimationFrame(animatePointer);
