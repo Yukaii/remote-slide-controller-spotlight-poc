@@ -18,6 +18,7 @@ const App = () => {
   const [showPointer, setShowPointer, showPointerRef] = useStateRef(false);
   const [motionData, setMotionData] = useState({ x: 'N/A', y: 'N/A', z: 'N/A' });
   const [permissionState, setPermissionState] = useState('unknown');
+  const [calibrationData, setCalibrationData, calibrationDataRef] = useStateRef(null);
   const lastUpdateTime = useRef(0);
   const lastSendTime = useRef(0);
   const animationRef = useRef(null);
@@ -36,7 +37,7 @@ const App = () => {
     };
     setMotionData(newMotionData);
 
-    if (mode === 'controller' && accelerationIncludingGravity) {
+    if (mode === 'controller' && accelerationIncludingGravity && calibrationDataRef.current) {
       const sensitivityX = 5;
       const sensitivityY = 7;
       const threshold = 0.5; // Minimum acceleration threshold
@@ -44,16 +45,19 @@ const App = () => {
       let deltaX = 0;
       let deltaY = 0;
 
-      if (Math.abs(accelerationIncludingGravity.x) > threshold) {
-        deltaX = accelerationIncludingGravity.x * sensitivityX;
+      const calibratedX = accelerationIncludingGravity.x - calibrationDataRef.current.x;
+      const calibratedY = accelerationIncludingGravity.y - calibrationDataRef.current.y;
+
+      if (Math.abs(calibratedX) > threshold) {
+        deltaX = calibratedX * sensitivityX;
       }
 
-      if (Math.abs(accelerationIncludingGravity.y) > threshold) {
-        deltaY = accelerationIncludingGravity.y * sensitivityY;
+      if (Math.abs(calibratedY) > threshold) {
+        deltaY = calibratedY * sensitivityY;
       }
 
-      const newX = targetPosition.current.x + deltaX; // Changed minus to plus
-      const newY = targetPosition.current.y + deltaY; // Changed minus to plus
+      const newX = targetPosition.current.x + deltaX;
+      const newY = targetPosition.current.y + deltaY;
 
       targetPosition.current = { x: newX, y: newY };
 
@@ -62,7 +66,7 @@ const App = () => {
         lastSendTime.current = now;
       }
     }
-  }, [mode]);
+  }, [mode, calibrationDataRef, showPointerRef]);
 
   const animatePointer = useCallback(() => {
     setPointerPosition(current => {
@@ -124,7 +128,7 @@ const App = () => {
       window.removeEventListener('devicemotion', handleDeviceMotion);
       cancelAnimationFrame(animationRef.current);
     };
-  }, [mode, handleDeviceMotion, animatePointer]);
+  }, [mode, handleDeviceMotion, animatePointer, setShowPointer]);
 
   const handleModeToggle = () => {
     setMode(prevMode => prevMode === 'presentation' ? 'controller' : 'presentation');
@@ -133,13 +137,33 @@ const App = () => {
   const handlePointerToggle = () => {
     setShowPointer(prev => {
       const newState = !prev;
+      if (newState) {
+        calibrate();
+      }
       sendMessage({ showPointer: newState });
       return newState;
     });
   };
 
+  const calibrate = () => {
+    if (window.DeviceMotionEvent) {
+      window.addEventListener('devicemotion', calibrationHandler, { once: true });
+    }
+  };
+
+  const calibrationHandler = (event) => {
+    const { accelerationIncludingGravity } = event;
+    if (accelerationIncludingGravity) {
+      setCalibrationData({
+        x: accelerationIncludingGravity.x,
+        y: accelerationIncludingGravity.y,
+        z: accelerationIncludingGravity.z
+      });
+    }
+  };
+
   return (
-    <div className="h-screen w-screen relative">
+    <div className="h-screen w-screen relative overflow-hidden">
       <button
         className="absolute top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded z-10"
         onClick={handleModeToggle}
@@ -178,6 +202,7 @@ const App = () => {
             <p>DeviceMotion Supported: {window.DeviceMotionEvent ? 'Yes' : 'No'}</p>
             <p>Permission State: {permissionState}</p>
             <p>Show Pointer: {showPointer ? 'Yes' : 'No'}</p>
+            <p>Calibration Data: {calibrationData ? 'Set' : 'Not Set'}</p>
           </div>
         </div>
       )}
