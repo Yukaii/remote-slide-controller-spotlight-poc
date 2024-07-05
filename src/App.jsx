@@ -26,7 +26,7 @@ const App = () => {
 
   const handleDeviceOrientation = useCallback((event) => {
     const now = Date.now();
-    if (now - lastUpdateTime.current < 32) return; // Limit updates to ~30fps
+    if (now - lastUpdateTime.current < 32) return;
     lastUpdateTime.current = now;
 
     const newOrientationData = {
@@ -37,22 +37,22 @@ const App = () => {
     setOrientationData(newOrientationData);
 
     if (mode === 'controller' && calibrationDataRef.current) {
-      const sensitivityX = 10;
-      const sensitivityY = 10;
+      const sensitivityX = 2; // Lowered sensitivity
+      const sensitivityY = 2; // Lowered sensitivity
 
       const calibratedBeta = event.beta - calibrationDataRef.current.beta;
       const calibratedGamma = event.gamma - calibrationDataRef.current.gamma;
 
       const deltaX = calibratedGamma * sensitivityX;
-      const deltaY = calibratedBeta * sensitivityY;
+      const deltaY = calibratedBeta * sensitivityY; // Removed negation to flip back
 
-      const newX = targetPosition.current.x + deltaX;
-      const newY = targetPosition.current.y + deltaY;
+      const newX = Math.max(0, Math.min(window.innerWidth, targetPosition.current.x + deltaX));
+      const newY = Math.max(0, Math.min(window.innerHeight, targetPosition.current.y + deltaY));
 
-      targetPosition.current = {
-        x: Math.max(0, Math.min(window.innerWidth, newX)),
-        y: Math.max(0, Math.min(window.innerHeight, newY))
-      };
+      targetPosition.current = { x: newX, y: newY };
+
+      // Update pointer position immediately to reduce lag
+      setPointerPosition({ x: newX, y: newY });
 
       if (showPointerRef.current && now - lastSendTime.current > 100) { // Send every 100ms
         sendMessage({ x: newX, y: newY, orientationData: newOrientationData, showPointer: showPointerRef.current });
@@ -63,8 +63,8 @@ const App = () => {
 
   const animatePointer = useCallback(() => {
     setPointerPosition(current => {
-      const dx = (targetPosition.current.x - current.x) * 0.3;
-      const dy = (targetPosition.current.y - current.y) * 0.3;
+      const dx = (targetPosition.current.x - current.x) * 0.2; // Lowered from 0.5 to 0.2
+      const dy = (targetPosition.current.y - current.y) * 0.2; // Lowered from 0.5 to 0.2
       return {
         x: Math.max(0, Math.min(window.innerWidth, current.x + dx)),
         y: Math.max(0, Math.min(window.innerHeight, current.y + dy))
@@ -72,7 +72,6 @@ const App = () => {
     });
     animationRef.current = requestAnimationFrame(animatePointer);
   }, []);
-
   const requestOrientationPermission = () => {
     if (typeof DeviceOrientationEvent.requestPermission === 'function') {
       DeviceOrientationEvent.requestPermission()
